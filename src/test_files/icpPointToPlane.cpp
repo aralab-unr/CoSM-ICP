@@ -1,0 +1,669 @@
+
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#include "icpPointToPlane.h"
+
+using namespace std;
+
+// Also see (3d part): "Linear Least-Squares Optimization for Point-to-Plane ICP Surface Registration" (Kok-Lim Low)
+double IcpPointToPlane::fitStep (double *T,const int32_t T_num,Matrix &R,Matrix &t,const std::vector<int32_t> &active,double delta) {
+
+  int32_t i;
+  int32_t nact = (int)active.size();
+   std::cout<<"corr_trig="<<corr_trigger_rms;
+  // init matrix for point32_t correspondences
+  Matrix p_m(nact,m_dim); // model
+  Matrix p_t(nact,m_dim); // template
+  
+  // dimensionality 2
+  if (m_dim==2) {
+
+    // extract matrix and translation vector
+    double r00 = R.val[0][0]; double r01 = R.val[0][1];
+    double r10 = R.val[1][0]; double r11 = R.val[1][1];
+    double t0  = t.val[0][0]; double t1  = t.val[1][0];
+
+    // init A and b
+    Matrix A(nact,3);
+    Matrix b(nact,1);
+
+    // establish correspondences
+#pragma omp parallel for private(i) default(none) shared(T,active,nact,p_m,p_t,A,b,r00,r01,r10,r11,t0,t1) // schedule (dynamic,2)
+    for (i=0; i<nact; i++) {
+      // kd tree query + result
+      std::vector<float>         query(m_dim);
+      kdtree::KDTreeResultVector result;
+
+      // get index of active point
+      int32_t idx = active[i];
+
+      // transform point according to R|t
+      query[0] = (float)(r00*T[idx*2+0] + r01*T[idx*2+1] + t0);
+      query[1] = (float)(r10*T[idx*2+0] + r11*T[idx*2+1] + t1);
+
+      // search nearest neighbor
+      m_kd_tree->n_nearest(query,1,result);
+
+      // model point
+      double dx = m_kd_tree->the_data[result[0].idx][0];
+      double dy = m_kd_tree->the_data[result[0].idx][1];
+
+      // model point normal
+      double nx = M_normal[result[0].idx*2+0];
+      double ny = M_normal[result[0].idx*2+1];
+
+      // template point
+      double sx = query[0];
+      double sy = query[1];
+
+      // setup least squares system
+      A.val[i][0] = ny*sx-nx*sy;
+      A.val[i][1] = nx;
+      A.val[i][2] = ny;
+      b.val[i][0] = nx*dx+ny*dy-nx*sx-ny*sy;    
+    }
+
+    // linear least square matrices
+    Matrix A_ = ~A*A;
+    Matrix b_ = ~A*b;
+
+    // solve linear system
+    if (b_.solve(A_)) {
+
+      // rotation matrix
+      Matrix R_ = Matrix::eye(2);
+      R_.val[0][1] = -b_.val[0][0];
+      R_.val[1][0] = +b_.val[0][0];
+
+      // orthonormalized rotation matrix
+      Matrix U,W,V;
+      R_.svd(U,W,V);
+      R_ = U*~V;  
+
+      // fix improper matrix problem
+      if (R_.det()<0){
+        Matrix B = Matrix::eye(m_dim);
+        B.val[m_dim-1][m_dim-1] = R_.det();
+        R_ = V*B*~U;
+      }
+
+      // translation vector
+      Matrix t_(2,1);
+      t_.val[0][0] = b_.val[1][0];
+      t_.val[1][0] = b_.val[2][0];
+
+      // compose: R|t = R_|t_ * R|t
+      R = R_*R;
+      t = R_*t+t_;
+	  
+      return max((R_-Matrix::eye(2)).l2norm(),t_.l2norm());
+    }
+   
+  // dimensionality 3
+  } else {
+    
+    // extract matrix and translation vector
+    double r00 = R.val[0][0]; double r01 = R.val[0][1]; double r02 = R.val[0][2];
+    double r10 = R.val[1][0]; double r11 = R.val[1][1]; double r12 = R.val[1][2];
+    double r20 = R.val[2][0]; double r21 = R.val[2][1]; double r22 = R.val[2][2];
+    double t0  = t.val[0][0]; double t1  = t.val[1][0]; double t2  = t.val[2][0];
+
+    // init A and b
+    Matrix A(nact,6);
+    Matrix b(nact,1);
+
+    // establish correspondences
+#pragma omp parallel for private(i) default(none) shared(T,active,nact,p_m,p_t,A,b,r00,r01,r02,r10,r11,r12,r20,r21,r22,t0,t1,t2) // schedule (dynamic,2)
+    for (i=0; i<nact; i++) {
+      // kd tree query + result
+      std::vector<float>         query(m_dim);
+      kdtree::KDTreeResultVector result;
+
+      // get index of active point
+      int32_t idx = active[i];
+
+      // transform point according to R|t
+      query[0] = (float)(r00*T[idx*3+0] + r01*T[idx*3+1] + r02*T[idx*3+2] + t0);
+      query[1] = (float)(r10*T[idx*3+0] + r11*T[idx*3+1] + r12*T[idx*3+2] + t1);
+      query[2] = (float)(r20*T[idx*3+0] + r21*T[idx*3+1] + r22*T[idx*3+2] + t2);
+
+      // search nearest neighbor
+      m_kd_tree->n_nearest(query,1,result);
+
+      // model point
+      double dx = m_kd_tree->the_data[result[0].idx][0];
+      double dy = m_kd_tree->the_data[result[0].idx][1];
+      double dz = m_kd_tree->the_data[result[0].idx][2];
+
+      // model point normal
+      double nx = M_normal[result[0].idx*3+0];
+      double ny = M_normal[result[0].idx*3+1];
+      double nz = M_normal[result[0].idx*3+2];
+
+      // template point
+      double sx = query[0];
+      double sy = query[1];
+      double sz = query[2];
+
+      // setup least squares system
+      A.val[i][0] = nz*sy-ny*sz;
+      A.val[i][1] = nx*sz-nz*sx;
+      A.val[i][2] = ny*sx-nx*sy;
+      A.val[i][3] = nx;
+      A.val[i][4] = ny;
+      A.val[i][5] = nz;
+      b.val[i][0] = nx*dx+ny*dy+nz*dz-nx*sx-ny*sy-nz*sz;    
+    }
+
+    // linear least square matrices
+    Matrix A_ = ~A*A;
+    Matrix b_ = ~A*b;
+
+    // solve linear system
+    if (b_.solve(A_)) {
+
+      // rotation matrix
+      Matrix R_ = Matrix::eye(3);
+      R_.val[0][1] = -b_.val[2][0];
+      R_.val[1][0] = +b_.val[2][0];
+      R_.val[0][2] = +b_.val[1][0];
+      R_.val[2][0] = -b_.val[1][0];
+      R_.val[1][2] = -b_.val[0][0];
+      R_.val[2][1] = +b_.val[0][0];
+
+      // orthonormalized rotation matrix
+      Matrix U,W,V;
+      R_.svd(U,W,V);
+      R_ = U*~V;  
+
+      // fix improper matrix problem
+      if (R_.det()<0){
+        Matrix B = Matrix::eye(m_dim);
+        B.val[m_dim-1][m_dim-1] = R_.det();
+        R_ = V*B*~U;
+      }
+
+      // translation vector
+      Matrix t_(3,1);
+      t_.val[0][0] = b_.val[3][0];
+      t_.val[1][0] = b_.val[4][0];
+      t_.val[2][0] = b_.val[5][0];
+
+      // compose: R|t = R_|t_ * R|t
+      R = R_*R;
+      t = R_*t+t_;
+      return max((R_-Matrix::eye(3)).l2norm(),t_.l2norm());
+    }
+  }
+  
+  // failure
+  return 0;
+}
+double IcpPointToPlane::fitStepCorr (double *T,const int32_t T_num,Matrix &R,Matrix &t,const std::vector<int32_t> &active,double delta) {
+  
+  int i;
+  int nact = (int)active.size();
+  iter_ctr++;
+  // init matrix for point correspondences
+  Matrix p_m(nact,m_dim); // model
+  Matrix p_t(nact,m_dim); // template
+  
+  // init mean
+  Matrix mu_m(1,m_dim);
+  Matrix mu_t(1,m_dim);
+
+  // using dummy variables for corr computation
+  Matrix dp_m(nact,m_dim); // model
+  Matrix dp_t(nact,m_dim); // template
+  
+  // init mean
+  Matrix dmu_m(1,m_dim);
+  Matrix dmu_t(1,m_dim);
+ 
+  Matrix cm(3,3);
+  Matrix cm2(nact,nact);
+  Matrix cm3(nact,nact);
+  cm2.zero();
+
+  std::cout<<"\ncorr_trigger="<<corr_trigger_rms<<" delta val="<<delta << " nact="<<nact;
+  
+
+  float sigma=0.05;
+  float dist=10;
+  float corr_th=0.95;
+  //sum_corr_val=0;
+  
+  
+  Eigen::MatrixXd m1(nact,m_dim);
+  string fn("iter_data/iter_ctr_");
+  fn+=to_string(iter_ctr)+".txt";
+  std::cout<<"fn="<<fn;
+  
+  int num_ctr=0;
+
+      cm.val[0][0]=sigma*sigma; cm.val[0][1]=0; cm.val[0][2]=0;
+      cm.val[1][0]=0; cm.val[1][1]=sigma*sigma; cm.val[1][2]=0;
+      cm.val[2][0]=0; cm.val[2][1]=0; cm.val[2][2]=sigma*sigma;
+  // dimensionality 2
+  if (m_dim==2) 
+  {
+    
+    // extract matrix and translation vector
+    double r00 = R.val[0][0]; double r01 = R.val[0][1];
+    double r10 = R.val[1][0]; double r11 = R.val[1][1];
+    double t0  = t.val[0][0]; double t1  = t.val[1][0];
+    double mum0 = 0.0, mum1 = 0.0;
+    double mut0 = 0.0, mut1 = 0.0;
+
+    // establish correspondences
+//#pragma omp parallel for private(i) default(none) shared(T,active,nact,p_m,p_t,r00,r01,r10,r11,t0,t1,fn) reduction(+:mum0,mum1, mut0,mut1) // schedule (dynamic,2)
+    for (i=0; i<nact; i++) {
+      // kd tree query + result
+      std::vector<float>         query(m_dim);
+      kdtree::KDTreeResultVector result;
+  
+       
+      // get index of active point
+      int32_t idx = active[i];
+
+      // transform point according to R|t
+      query[0] = (float)(r00*T[idx*2+0] + r01*T[idx*2+1] + t0);
+      query[1] = (float)(r10*T[idx*2+0] + r11*T[idx*2+1] + t1);
+
+      // search nearest neighbor
+      m_kd_tree->n_nearest(query,nact,result);
+
+      // set model point
+      p_m.val[i][0] = m_kd_tree->the_data[result[0].idx][0]; mum0 += p_m.val[i][0];
+      p_m.val[i][1] = m_kd_tree->the_data[result[0].idx][1]; mum1 += p_m.val[i][1];
+
+      // set template point
+      p_t.val[i][0] = query[0]; mut0 += p_t.val[i][0];
+      p_t.val[i][1] = query[1]; mut1 += p_t.val[i][1];
+    }
+    mu_m.val[0][0] = mum0;
+    mu_m.val[0][1] = mum1;
+
+    mu_t.val[0][0] = mut0;
+    mu_t.val[0][1] = mut1;
+    
+  // dimensionality 3
+  } 
+  else 
+  {
+
+    
+    // extract matrix and translation vector
+    double r00 = R.val[0][0]; double r01 = R.val[0][1]; double r02 = R.val[0][2];
+    double r10 = R.val[1][0]; double r11 = R.val[1][1]; double r12 = R.val[1][2];
+    double r20 = R.val[2][0]; double r21 = R.val[2][1]; double r22 = R.val[2][2];
+    double t0  = t.val[0][0]; double t1  = t.val[1][0]; double t2  = t.val[2][0];
+    double mum0 = 0.0, mum1 = 0.0, mum2 = 0.0;
+    double mut0 = 0.0, mut1 = 0.0, mut2 = 0.0;
+
+    double dmum0 = 0.0, dmum1 = 0.0, dmum2 = 0.0;
+    double dmut0 = 0.0, dmut1 = 0.0, dmut2 = 0.0;
+
+    Matrix s1(1,3);
+  Matrix s2(1,3);
+  double val1,corr_val;
+  Matrix pinv,corval;
+  
+    // establish correspondences
+//#pragma omp parallel for private(i) default(none) shared(T,active,nact,p_m,p_t,r00,r01,r02,r10,r11,r12,r20,r21,r22,t0,t1,t2,sum_corr_val,corval,pinv,flagsc,val1,corr_val,s1,s2,fn,cm,ofs,sigma,cm2,num_ctr,gnum_ctr) reduction(+:mum0,mum1,mum2, mut0,mut1,mut2) // schedule (dynamic,2)
+   
+    for (i=0; i<nact; i++) 
+    {
+     
+
+      // kd tree query + result
+      ofs.open(fn,ios::app);
+     
+      std::vector<float> query(m_dim);
+      kdtree::KDTreeResultVector result;
+
+      // get index of active point
+      int32_t idx = active[i];
+
+      // transform point according to R|t
+      query[0] = (float)(r00*T[idx*3+0] + r01*T[idx*3+1] + r02*T[idx*3+2] + t0);
+      query[1] = (float)(r10*T[idx*3+0] + r11*T[idx*3+1] + r12*T[idx*3+2] + t1);
+      query[2] = (float)(r20*T[idx*3+0] + r21*T[idx*3+1] + r22*T[idx*3+2] + t2);
+
+      // search nearest neighbor
+      m_kd_tree->n_nearest(query,1,result);
+
+      // set model point
+      p_m.val[i][0] = m_kd_tree->the_data[result[0].idx][0]; 
+      mum0 += p_m.val[i][0];
+      p_m.val[i][1] = m_kd_tree->the_data[result[0].idx][1]; 
+      mum1 += p_m.val[i][1];
+      p_m.val[i][2] = m_kd_tree->the_data[result[0].idx][2]; 
+      mum2 += p_m.val[i][2];
+      
+
+
+      // set template point
+      p_t.val[i][0] = query[0]; 
+      mut0 += p_t.val[i][0];
+      p_t.val[i][1] = query[1]; 
+      mut1 += p_t.val[i][1];
+      p_t.val[i][2] = query[2];
+      mut2 += p_t.val[i][2]; 
+      
+      flagsc[i]=1;
+
+    //for(int j=0;j<nact;j++)
+    
+      s1.val[0][0]=m_kd_tree->the_data[result[0].idx][0]; 
+      s1.val[0][1]=m_kd_tree->the_data[result[0].idx][1];  
+      s1.val[0][2]=m_kd_tree->the_data[result[0].idx][2];
+      
+      s2.val[0][0]=query[0]; 
+      s2.val[0][1]=query[1];  
+      s2.val[0][2]=query[2];
+       
+      pinv=Matrix::inv(cm);
+      corval=(s1-s2)*~(s1-s2);
+      val1=corval.val[0][0];
+      corr_val=(1/(pow(2*M_PI*sigma,1/3)))*exp(-(val1*val1)/(2*sigma*sigma));
+      cm2.val[i][result[0].idx]=corr_val;
+      sum_corr_val+=corr_val;
+    
+      num_ctr++;
+      
+     ofs<<p_m.val[i][0]<<" "<<p_m.val[i][1]<<" "<<p_m.val[i][2]<<" "<<p_t.val[i][0]<<" "<<p_t.val[i][1]<<" "<<p_t.val[i][2]<<" corrval="<<corr_val<<"\n";
+      ofs.close();
+      //std::cout<<"\nC_1";
+
+    }
+     
+    mu_m.val[0][0] = mum0;
+    mu_m.val[0][1] = mum1;
+    mu_m.val[0][2] = mum2;
+
+    mu_t.val[0][0] = mut0;
+    mu_t.val[0][1] = mut1;
+    mu_t.val[0][2] = mut2;
+
+  }
+  sum_corr_val=sum_corr_val/num_ctr;
+  //std::cout<< " sum_corr_val="<<sum_corr_val<<" "; 
+
+  //std::cout<< "1.gnum_ctr="<<gnum_ctr<<" num_ctr="<<num_ctr;
+  // subtract mean
+  mu_m = mu_m/(double)active.size();
+  mu_t = mu_t/(double)active.size();
+  Matrix q_m = p_m - Matrix::ones(active.size(),1)*mu_m;
+  Matrix q_t = p_t - Matrix::ones(active.size(),1)*mu_t;
+                                            
+  Matrix dq_m,dq_t;
+
+  
+  //std::cout<<" clear_so far  ";     
+
+  // compute relative rotation matrix R and translation vector t
+  Matrix H = ~q_t*cm2*q_m;
+  Matrix U,W,V;
+  H.svd(U,W,V);
+  Matrix R_ = V*~U;
+
+  //std::cout<<"clear_so far1  ";
+ 
+  if (R_.det()<0)
+  {
+    Matrix B = Matrix::eye(m_dim);
+    B.val[m_dim-1][m_dim-1] = R_.det();
+    R_ = V*B*~U;
+  }
+
+
+//std::cout<<"clear_so far2 ";
+
+
+  Matrix t_ = ~mu_m - R_*~mu_t;
+  
+  // compose: R|t = R_|t_ * R|t
+  R = R_*R;
+  t = R_*t+t_;
+
+ gnum_ctr=num_ctr;
+  
+  if (m_dim==2) return max((R_-Matrix::eye(2)).l2norm(),t_.l2norm());
+  else        return max((R_-Matrix::eye(3)).l2norm(),t_.l2norm());
+}
+
+std::vector<int32_t> IcpPointToPlane::getInliers (double *T,const int32_t T_num,const Matrix &R,const Matrix &t,const double indist) {
+  
+  // init inlier vector + query point + query result
+  vector<int32_t>            inliers;
+  std::vector<float>         query(m_dim);
+  kdtree::KDTreeResultVector neighbor;
+  
+  // dimensionality 2
+  if (m_dim==2) {
+  
+    // extract matrix and translation vector
+    double r00 = R.val[0][0]; double r01 = R.val[0][1];
+    double r10 = R.val[1][0]; double r11 = R.val[1][1];
+    double t0  = t.val[0][0]; double t1  = t.val[1][0];
+
+    // check for all points if they are inliers
+    for (int32_t i=0; i<T_num; i++) {
+
+      // transform point according to R|t
+      double sx = r00*T[i*2+0] + r01*T[i*2+1] + t0; query[0] = (float)sx;
+      double sy = r10*T[i*2+0] + r11*T[i*2+1] + t1; query[1] = (float)sy;
+
+      // search nearest neighbor
+      m_kd_tree->n_nearest(query,1,neighbor);
+
+      // model point
+      double dx = m_kd_tree->the_data[neighbor[0].idx][0];
+      double dy = m_kd_tree->the_data[neighbor[0].idx][1];
+
+      // model point normal
+      double nx = M_normal[neighbor[0].idx*2+0];
+      double ny = M_normal[neighbor[0].idx*2+1];
+
+      // check if it is an inlier
+      if (/*neighbor[0].dis<3*indist && */abs((sx-dx)*nx+(sy-dy)*ny)<indist)
+        inliers.push_back(i);
+    }
+    
+  // dimensionality 3
+  } else {
+    
+    // extract matrix and translation vector
+    double r00 = R.val[0][0]; double r01 = R.val[0][1]; double r02 = R.val[0][2];
+    double r10 = R.val[1][0]; double r11 = R.val[1][1]; double r12 = R.val[1][2];
+    double r20 = R.val[2][0]; double r21 = R.val[2][1]; double r22 = R.val[2][2];
+    double t0  = t.val[0][0]; double t1  = t.val[1][0]; double t2  = t.val[2][0];
+
+    // check for all points if they are inliers
+    for (int32_t i=0; i<T_num; i++) {
+
+      // transform point according to R|t
+      double sx = r00*T[i*3+0] + r01*T[i*3+1] + r02*T[i*3+2] + t0; query[0] = (float)sx;
+      double sy = r10*T[i*3+0] + r11*T[i*3+1] + r12*T[i*3+2] + t1; query[1] = (float)sy;
+      double sz = r20*T[i*3+0] + r21*T[i*3+1] + r22*T[i*3+2] + t2; query[2] = (float)sz;
+
+      // search nearest neighbor
+      m_kd_tree->n_nearest(query,1,neighbor);
+
+      // model point
+      double dx = m_kd_tree->the_data[neighbor[0].idx][0];
+      double dy = m_kd_tree->the_data[neighbor[0].idx][1];
+      double dz = m_kd_tree->the_data[neighbor[0].idx][2];
+
+      // model point normal
+      double nx = M_normal[neighbor[0].idx*3+0];
+      double ny = M_normal[neighbor[0].idx*3+1];
+      double nz = M_normal[neighbor[0].idx*3+2];
+
+      // check if it is an inlier
+      if (abs((sx-dx)*nx+(sy-dy)*ny+(sz-dz))*nz<indist)
+        inliers.push_back(i);
+    }
+  }
+  
+  // return vector with inliers
+  return inliers;
+}
+
+void IcpPointToPlane::computeNormal (const kdtree::KDTreeResultVector &neighbors,double *M_normal,const double flatness) {
+  
+  // dimensionality 2
+  if (m_dim==2) {
+    
+    // extract neighbors
+    Matrix P(neighbors.size(),2);
+    Matrix mu(1,2);
+    for (uint32_t i=0; i<neighbors.size(); i++) {
+      double x = m_kd_tree->the_data[neighbors[i].idx][0];
+      double y = m_kd_tree->the_data[neighbors[i].idx][1];
+      P.val[i][0] = x;
+      P.val[i][1] = y;
+      mu.val[0][0] += x;
+      mu.val[0][1] += y;
+    }
+    // zero mean
+    mu       = mu/(double)neighbors.size();
+    Matrix Q = P - Matrix::ones(neighbors.size(),1)*mu;
+
+    // principal component analysis
+    Matrix H = ~Q*Q;
+    Matrix U,W,V;
+    H.svd(U,W,V);
+
+    // normal
+    M_normal[0] = U.val[0][1];
+    M_normal[1] = U.val[1][1];
+  
+  // dimensionality 3
+  } else {
+    
+    // extract neighbors
+    Matrix P(neighbors.size(),3);
+    Matrix mu(1,3);
+    for (uint32_t i=0; i<neighbors.size(); i++) {
+      double x = m_kd_tree->the_data[neighbors[i].idx][0];
+      double y = m_kd_tree->the_data[neighbors[i].idx][1];
+      double z = m_kd_tree->the_data[neighbors[i].idx][2];
+      P.val[i][0] = x;
+      P.val[i][1] = y;
+      P.val[i][2] = z;
+      mu.val[0][0] += x;
+      mu.val[0][1] += y;
+      mu.val[0][2] += z;
+    }
+
+    // zero mean
+    mu       = mu/(double)neighbors.size();
+    Matrix Q = P - Matrix::ones(neighbors.size(),1)*mu;
+
+    // principal component analysis
+    Matrix H = ~Q*Q;
+    Matrix U,W,V;
+    H.svd(U,W,V);
+
+    // normal
+    M_normal[0] = U.val[0][2];
+    M_normal[1] = U.val[1][2];
+    M_normal[2] = U.val[2][2];
+  }
+}
+
+double* IcpPointToPlane::computeNormals (const int32_t num_neighbors,const double flatness) {
+  double *M_normal = (double*)malloc(m_kd_tree->N*m_dim*sizeof(double));
+  kdtree::KDTreeResultVector neighbors;
+  for (int32_t i=0; i<m_kd_tree->N; i++) {
+    m_kd_tree->n_nearest_around_point(i,0,num_neighbors,neighbors);
+    // m_kd_tree->r_nearest_around_point(i,0,0.05,neighbors);
+    if (m_dim==2) computeNormal(neighbors,M_normal+i*2,flatness);
+    else        computeNormal(neighbors,M_normal+i*3,flatness);
+  }
+
+  return M_normal;
+}
+
+double IcpPointToPlane::getResidual( double *T,const int32_t T_num,const Matrix &R,const Matrix &t,const std::vector<int> &active )
+{
+	if(active.empty()) return 0;
+	int nact = active.size();
+	double residual = 0;
+
+	std::vector<float>         query(m_dim);
+	kdtree::KDTreeResultVector result;
+
+	if (m_dim==2) {
+		// extract matrix and translation vector
+		double r00 = R.val[0][0]; double r01 = R.val[0][1];
+		double r10 = R.val[1][0]; double r11 = R.val[1][1];
+		double t0  = t.val[0][0]; double t1  = t.val[1][0];
+		for (int32_t i=0; i<nact; i++) {
+			// kd tree query + result
+			int32_t idx = active[i];
+			
+			// transform point according to R|t
+			double tx = r00*T[idx*2+0] + r01*T[idx*2+1] + t0;
+			double ty = r10*T[idx*2+0] + r11*T[idx*2+1] + t1;
+			query[0] = (float)tx;
+			query[1] = (float)ty;
+
+			// search nearest neighbor
+			m_kd_tree->n_nearest(query,1,result);
+			// model point
+			double mx = m_kd_tree->the_data[result[0].idx][0];
+			double my = m_kd_tree->the_data[result[0].idx][1];
+			// model point normal
+			double nx = M_normal[result[0].idx*2+0];
+			double ny = M_normal[result[0].idx*2+1];
+			
+			residual += abs(nx * (mx-tx) + ny * (my-ty));
+
+		}
+		// dimensionality 3
+	} else {
+		// extract matrix and translation vector
+		double r00 = R.val[0][0]; double r01 = R.val[0][1]; double r02 = R.val[0][2];
+		double r10 = R.val[1][0]; double r11 = R.val[1][1]; double r12 = R.val[1][2];
+		double r20 = R.val[2][0]; double r21 = R.val[2][1]; double r22 = R.val[2][2];
+		double t0  = t.val[0][0]; double t1  = t.val[1][0]; double t2  = t.val[2][0];
+		for (int32_t i=0; i<nact; i++) {
+			// kd tree query + result
+			std::vector<float>         query(m_dim);
+			kdtree::KDTreeResultVector result;
+			// get index of active point
+			int32_t idx = active[i];
+			// transform point according to R|t
+			double tx = r00*T[idx*3+0] + r01*T[idx*3+1] + r02*T[idx*3+2] + t0;
+			double ty = r10*T[idx*3+0] + r11*T[idx*3+1] + r12*T[idx*3+2] + t1;
+			double tz = r20*T[idx*3+0] + r21*T[idx*3+1] + r22*T[idx*3+2] + t2;
+			query[0] = (float)tx;
+			query[1] = (float)ty;
+			query[2] = (float)tz;
+			// search nearest neighbor
+			m_kd_tree->n_nearest(query,1,result);
+			//
+			// model point
+			double mx = m_kd_tree->the_data[result[0].idx][0];
+			double my = m_kd_tree->the_data[result[0].idx][1];
+			double mz = m_kd_tree->the_data[result[0].idx][2];
+
+			// model point normal
+			double nx = M_normal[result[0].idx*3+0];
+			double ny = M_normal[result[0].idx*3+1];
+			double nz = M_normal[result[0].idx*3+2];
+
+			residual += nx * (mx-tx) + ny * (my-ty) + nz * (mz-tz);
+		}
+	}
+	residual /= nact;
+	return residual;
+}
+
+
