@@ -11,7 +11,6 @@ Few Notes before proceeding:
 4) test_files contains our original implementation from scratch. We originally worked in this implementation and it's from libicp from Andreas Gieger.
 
 Steps to Run the Program.
-  Open terminal and run setup.sh in the directory. 
-  a figure window like the one shown above pops up.
+1) Open terminal and run setup.sh in the directory. A figure window like the one shown above pops up.
   
   
