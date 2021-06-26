@@ -11,6 +11,10 @@ Few Notes before proceeding:
 4) test_files contains our original implementation from scratch. We originally worked in this implementation and it's from libicp from Andreas Gieger.
 
 Steps to Run the Program.
-1) Open terminal and run setup.sh in the directory. A figure window like the one shown above pops up.
+1) Open terminal and run setup.sh in the directory. A figure window like the one shown above pops up. Hit 'space' to increase the iteration number.
+2) You can run it individually as :  ./CoSM_ICP_demo_Viewer bun01.pcd 1 0.005
+bun01 --> filename
+1 --> iteration increase counter when you hit space.
+0.005 --> voxel size to reduce the nmber of point clouds.
   
   
