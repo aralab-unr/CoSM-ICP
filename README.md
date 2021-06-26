@@ -16,7 +16,9 @@ Steps to Run the Program.
 
 
 bun01 --> filename
+
 1 --> iteration increase counter when you hit space.
+
 0.005 --> voxel size to reduce the nmber of point clouds.
   
   
