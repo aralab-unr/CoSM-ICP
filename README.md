@@ -15,7 +15,7 @@ Steps to Run the Program.
 2) You can run it individually as :  ./CoSM_ICP_demo_Viewer bun01.pcd 1 0.005
 
 
-bun01 --> filename
+bun01.pcd --> filename
 
 1 --> iteration increase counter when you hit space.
 
