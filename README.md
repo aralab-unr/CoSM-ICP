@@ -1,2 +1,2 @@
 # CoSM_ICP
-![Alt Text](https://media.giphy.com/media/vFKqnCdLPNOKc/giphy.gif)
+![Alt Text](gif_1.gif)
