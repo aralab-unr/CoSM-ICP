@@ -19,6 +19,10 @@ bun01.pcd --> filename
 
 1 --> iteration increase counter when you hit space.
 
-0.005 --> voxel size to reduce the nmber of point clouds.
+0.005 --> voxel size to reduce the number of point clouds.
+
+Please let us know if you have any questions: 
+
+Email: ashutosh.singandhupe@gmail.com
   
   
