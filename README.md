@@ -21,6 +21,8 @@ bun01.pcd --> filename
 
 0.005 --> voxel size to reduce the number of point clouds.
 
+If you want to introduce outliers you can select the percentage of points that can be affected by outliers by editing line 495 in CoSM_ICP_demo_Viewer.cpp to see how well it performs in the presence of outliers. The double variable 'per' determines the percentage of data that is affected by outliers.
+
 Please let us know if you have any questions: 
 
 Email: ashutosh.singandhupe@gmail.com
