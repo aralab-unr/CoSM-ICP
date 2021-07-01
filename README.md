@@ -10,7 +10,7 @@ Few Notes before proceeding:
 3) CoSM_ICP_demo_Viewer.cpp is the main file which allows you to compare different methods present in the PCL library. CoSM_Results_Collection.cpp simply collects the same(transformation and RMSE's) in a file.
 4) test_files contains our original implementation from scratch. We originally worked in this implementation and it's from libicp from Andreas Gieger.
 
-Steps to Run the Program.
+Steps to Run the Program (Tested in Ubuntu 18.04).
 1) Open terminal and run setup.sh in the directory. A figure window like the one shown above pops up. Hit 'space' to increase the iteration number.
 2) You can run it individually as :  ./CoSM_ICP_demo_Viewer bun01.pcd 1 0.005
 
