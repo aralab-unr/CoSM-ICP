@@ -1,7 +1,7 @@
 # CoSM_ICP
 <img src="gif_1.gif" width="1380" height="800"/>****
 
-The last row last column in the figure above shows the CoSM ICP results.
+The last row last column in the figure above shows the CoSM ICP results. The key thing in this work is to estimate the transformation accurately under various random rotation and translation(transformation). 
 
 Welcome to CoSM_ICP Algorithm.
 Few Notes before proceeding:
