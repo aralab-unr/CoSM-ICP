@@ -17,7 +17,7 @@ Steps to Run the Program (Tested in Ubuntu 18.04).
 
 bun01.pcd --> filename
 
-1 --> iteration increase counter when you hit space.
+1 --> If you hit space in the GUI the iteration is performed '1' times. Change it to your preference.
 
 0.005 --> voxel size to reduce the number of point clouds.
 
